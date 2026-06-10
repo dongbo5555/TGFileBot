@@ -174,7 +174,11 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 			diff := time.Since(infos.TCPStatus.User.WakeTime)
 			minutes := int(diff.Minutes())
 			seconds := int(diff.Seconds()) % 60
-			log.Printf("TCP 链路正常, %02d分%02d秒前唤醒", minutes, seconds)
+			if minutes != 0 {
+				log.Printf("TCP 链路正常, %02d分%02d秒前唤醒", minutes, seconds)
+			} else {
+				log.Printf("TCP 链路正常, %02d秒前唤醒", seconds)
+			}
 		}
 	case "bot":
 		if time.Since(infos.TCPStatus.Bot.WakeTime).Minutes() > 30 {
@@ -185,7 +189,11 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 			diff := time.Since(infos.TCPStatus.Bot.WakeTime)
 			minutes := int(diff.Minutes())
 			seconds := int(diff.Seconds()) % 60
-			log.Printf("TCP 链路正常, %02d分%02d秒前唤醒", minutes, seconds)
+			if minutes != 0 {
+				log.Printf("TCP 链路正常, %02d分%02d秒前唤醒", minutes, seconds)
+			} else {
+				log.Printf("TCP 链路正常, %02d秒前唤醒", seconds)
+			}
 		}
 	}
 
