@@ -74,9 +74,10 @@ func handleParams(r *http.Request) (result Params, err error) {
 	result.Cate = params.Get("cate")
 	result.Keywords = params.Get("keywords")
 
-	result.CName = params.Get("cname")
-	if result.CName != "" {
-		result.CName = "@" + strings.TrimLeft(result.CName, "@")
+	values := strings.Split(params.Get("cname"), ",")
+	result.Channels = make([]string, 0, len(values))
+	for _, value := range values {
+		result.Channels = append(result.Channels, "@"+strings.TrimLeft(value, "@"))
 	}
 
 	page, err := strconv.Atoi(params.Get("page"))
@@ -281,11 +282,15 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	cname := "@" + strings.TrimLeft(params.CName, "@")
-	items, err := infos.list(cname, params.Page, params.Limit, params.Filter)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+
+	items := make([]Items, 0, len(params.Channels))
+	for _, channel := range params.Channels {
+		item, err := infos.list(channel, params.Page, params.Limit, params.Filter)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		items = append(items, item)
 	}
 	content, err := json.Marshal(items)
 	if err != nil {
@@ -492,11 +497,10 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	channels := make([]string, len(infos.Conf.Channels))
 	infos.Mutex.RLock() // 加锁保护读取过程
-	cname := params.CName
-	if cname == "" {
+	if len(params.Channels) == 0 {
 		copy(channels, infos.Conf.Channels)
 	} else {
-		channels = append(channels, cname)
+		copy(channels, params.Channels)
 	}
 	infos.Mutex.RUnlock() // 读取完立即解锁
 

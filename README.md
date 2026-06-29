@@ -210,12 +210,13 @@ docker run -d --name tgfilebot -p 8080:8080 -v $(pwd)/files:/root/files tgfilebo
 | `key` | 否* | 明文访问密码(与hash二选一) |
 | `hash` | 否* | 哈希鉴权(与key二选一) |
 | `uid` | 否* | 使用 `hash` 时对应的用户 ID |
+| `o` | 否* | 用于指定解析的偏移量 |
 
 **支持的链接格式**:
 - 私有频道: `https://t.me/c/1234567890/100`
 - 公开频道: `https://t.me/channelname/100`
 - 带评论区链接: `https://t.me/c/1234567890/100?comment=200`
-- 带偏移量链接: `https://t.me/c/1234567890/100?o=5` (或使用 `&o=5` 参数，用于指定搜索/解析的偏移消息 ID)
+- 带偏移量链接: `https://t.me/c/1234567890/100?o=5` (或使用 `&o=5` 参数，用于指定解析的偏移量)
 
 ---
 

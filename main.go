@@ -29,8 +29,8 @@ type Params struct {
 	Page     int
 	Limit    int
 	Cate     string
-	CName    string
 	Keywords string
+	Channels []string
 }
 
 // HackLink 结构体用于在处理提取链接时传递中间数据
