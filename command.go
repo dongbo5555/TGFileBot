@@ -279,7 +279,7 @@ func handleBotCommand(m *telegram.NewMessage) error {
 				sendMS(m, fmt.Sprintf("当前最大缓存: %s", formatFileSize(infos.Conf.MaxSize)), nil, 60)
 				return nil
 			}
-			value := convertMaxSize(content)
+			value := convertSize(content)
 			if value == 0 {
 				sendMS(m, "最大缓存格式错误", nil, 60)
 				return nil

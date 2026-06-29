@@ -50,7 +50,7 @@ func formatFileSize(size int64) string {
 }
 
 // convertMaxSize 将用户输入的缓存大小字符串（如 "32M"）转换为字节数
-func convertMaxSize(str string) int64 {
+func convertSize(str string) int64 {
 	var unit int64 = 1
 	src := strings.ToUpper(str)
 	switch {
@@ -63,6 +63,9 @@ func convertMaxSize(str string) int64 {
 	case strings.HasSuffix(src, "M"):
 		src = strings.TrimSuffix(src, "M")
 		unit = 1024 * 1024
+	case strings.HasSuffix(src, "G"):
+		src = strings.TrimSuffix(src, "G")
+		unit = 1024 * 1024 * 1024
 	default:
 		return int64(128 * 1024)
 	}
@@ -233,6 +236,41 @@ func mediaCacheSizes(size int64) (headSize int64, tailSize int64) {
 	default:
 		headSize = 8 * 1024 * 1024
 		tailSize = 8 * 1024 * 1024
+	}
+	return
+}
+
+// handleOffset 处理消息偏移量
+func handleOffset(act, kname string, value int32) (offset int32) {
+	offSets.Mutex.Lock()
+	defer offSets.Mutex.Unlock()
+	switch strings.ToLower(act) {
+	case "get":
+		if values, ok := offSets.OffSets[kname]; ok {
+			if time.Since(values.Time) < time.Hour {
+				offset = values.Offset
+			} else {
+				delete(offSets.OffSets, kname)
+			}
+		}
+	case "set":
+		if len(offSets.OffSets) >= 32 {
+			var oldestKname string
+			var oldestTime time.Time
+			for k, v := range offSets.OffSets {
+				if oldestTime.IsZero() || v.Time.Before(oldestTime) {
+					oldestTime = v.Time
+					oldestKname = k
+				}
+			}
+			if !oldestTime.IsZero() {
+				delete(offSets.OffSets, oldestKname)
+			}
+		}
+		offSets.OffSets[kname] = OffSet{
+			Offset: value,
+			Time:   time.Now(),
+		}
 	}
 	return
 }

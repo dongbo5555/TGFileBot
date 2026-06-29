@@ -215,6 +215,37 @@ docker run -d --name tgfilebot -p 8080:8080 -v $(pwd)/files:/root/files tgfilebo
 - 私有频道: `https://t.me/c/1234567890/100`
 - 公开频道: `https://t.me/channelname/100`
 - 带评论区链接: `https://t.me/c/1234567890/100?comment=200`
+- 带偏移量链接: `https://t.me/c/1234567890/100?o=5` (或使用 `&o=5` 参数，用于指定搜索/解析的偏移消息 ID)
+
+---
+
+### `GET /list` — 频道内容列表接口
+
+获取指定频道的视频媒体列表，需 UserBot 已登录。
+
+**URL 格式**:
+```
+/list?cname={频道别名}&page={页码}&limit={每页数量}&filter={过滤大小}&key={key}
+```
+
+| 参数 | 必填 | 说明 |
+|:---|:---:|:---|
+| `cname` | 是 | 频道别名/用户名（例如 `@channelname` 或 `channelname`） |
+| `page` | 否 | 页码，默认 `1` |
+| `limit` | 否 | 每页返回数量，默认 `20` |
+| `filter` | 否 | 过滤文件大小，如 `10M`，仅返回大于此大小的文件，默认 `128K` |
+| `key` / `hash` / `uid` | 否* | 鉴权参数（同上） |
+
+**响应示例**:
+```json
+{
+  "more": true,
+  "channel": "频道名称",
+  "item": [
+    { "name": "example.mp4", "mid": 100, "cid": -1001234567890, "size": 104857600 }
+  ]
+}
+```
 
 ---
 
@@ -224,7 +255,7 @@ docker run -d --name tgfilebot -p 8080:8080 -v $(pwd)/files:/root/files tgfilebo
 
 **URL 格式**:
 ```
-/search?keywords={关键词}&page={页码}&limit={每页数量}&offset={偏移量}&key={key}
+/search?keywords={关键词}&page={页码}&limit={每页数量}&offset={偏移ID}&key={key}
 ```
 
 | 参数 | 必填 | 说明 |
@@ -232,7 +263,7 @@ docker run -d --name tgfilebot -p 8080:8080 -v $(pwd)/files:/root/files tgfilebo
 | `keywords` | 是 | 搜索关键词 |
 | `page` | 否 | 页码，默认 `1` |
 | `limit` | 否 | 每页返回数量，默认 `20` |
-| `offset` | 否 | 结果偏移量，默认 `0` |
+| `offset` | 否 | 结果偏移ID，用于翻页，默认 `0` |
 | `key` / `hash` / `uid` | 否* | 鉴权参数（同上）|
 
 **响应示例**:

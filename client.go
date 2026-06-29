@@ -636,6 +636,78 @@ func botConf(cate string) (conf telegram.ClientConfig) {
 	return conf
 }
 
+// list
+func (infos *Infos) list(channel string, page, limit int, filter int64) (items Items, err error) {
+	if waitUntil := infos.WaitUntil.Load(); waitUntil > 0 {
+		if remaining := time.Until(time.Unix(waitUntil, 0)); remaining > 0 {
+			log.Printf("列表: 检测到FloodWait, 等待 %.2f 秒", remaining.Seconds())
+			time.Sleep(remaining)
+		}
+	}
+
+	ch, err := infos.handleChannel(channel)
+	if err != nil {
+		return items, err
+	}
+	if page == 1 {
+		handleOffset("del", channel, 0)
+	}
+
+	offset := handleOffset("get", fmt.Sprintf("%s|%d", channel, page), 0)
+	if page > 1 && offset == 0 {
+		return items, errors.New("未找到匹配消息")
+	}
+
+	ms, err := infos.UserClient.GetMessages(ch, &telegram.SearchOption{
+		Limit:  int32(limit),
+		Offset: offset,
+		Filter: &telegram.InputMessagesFilterVideo{},
+	})
+
+	if err != nil {
+		return items, err
+	}
+	if len(ms) == 0 {
+		return items, errors.New("未找到匹配消息")
+	}
+
+	if len(ms) == limit {
+		handleOffset("set", fmt.Sprintf("%s|%d", channel, page+1), ms[len(ms)-1].ID)
+	}
+
+	for _, m := range ms {
+		if m.File == nil {
+			continue
+		}
+
+		size := m.File.Size
+		if size < filter {
+			continue
+		}
+
+		if items.Channel == "" {
+			items.Channel = strings.TrimSpace(m.Channel.Title)
+		}
+
+		name := strings.TrimSpace(m.File.Name)
+		if name == "" {
+			name = strings.TrimSpace(m.Text())
+		}
+		name = strings.ReplaceAll(name, "_", "")
+		
+		items.Item = append(items.Item, Item{
+			Name: name,
+			Size: size,
+			CID:  m.Channel.ID,
+			MID:  m.ID,
+		})
+	}
+	if len(items.Item) > 0 {
+		items.HasMore = true
+	}
+	return items, nil
+}
+
 // search 在指定频道中搜索关键词并返回匹配的媒体文件列表
 func (infos *Infos) search(channel, keywords string, page, limit int, offset int32) (items Items, err error) {
 	if waitUntil := infos.WaitUntil.Load(); waitUntil > 0 {
@@ -645,18 +717,14 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 		}
 	}
 
-	ch, err := infos.UserClient.ResolvePeer(fmt.Sprintf("@%s", channel))
+	ch, err := infos.handleChannel(channel)
 	if err != nil {
-		log.Printf("频道解析失败: %+v", err)
 		return items, err
 	}
+
 	if offset == 0 {
-		offSets.Mutex.Lock()
 		key := fmt.Sprintf("%s|%s|%d", channel, keywords, page)
-		if values, ok := offSets.OffSets[key]; ok && time.Since(values.Time) < time.Hour {
-			offset = values.Offset
-		}
-		offSets.Mutex.Unlock()
+		offset = handleOffset("get", key, offset)
 		if page > 1 && offset == 0 {
 			return items, errors.New("未找到匹配消息")
 		}
@@ -677,14 +745,8 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 	}
 
 	if len(ms) == limit {
-		items.HasMore = true
 		key := fmt.Sprintf("%s|%s|%d", channel, keywords, page+1)
-		offSets.Mutex.Lock()
-		offSets.OffSets[key] = OffSet{
-			Offset: ms[len(ms)-1].ID,
-			Time:   time.Now(),
-		}
-		offSets.Mutex.Unlock()
+		handleOffset("set", key, ms[len(ms)-1].ID)
 	}
 
 	slices.Reverse(ms)
@@ -756,6 +818,10 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 			})
 		}
 	}
+	if len(items.Item) > 0 {
+		items.HasMore = true
+	}
+
 	return items, nil
 }
 
@@ -825,4 +891,22 @@ func (infos *Infos) handleMs(cid int64, mid int32, cate string) (result string, 
 		return
 	}
 	return
+}
+
+// handleChannel 处理频道ID, 返回 InputPeer
+func (infos *Infos) handleChannel(channel string) (result telegram.InputPeer, err error) {
+	infos.Mutex.RLock()
+	result, ok := infos.ChannelID[channel]
+	infos.Mutex.RUnlock()
+	if !ok {
+		result, err = infos.UserClient.ResolvePeer(channel)
+		if err != nil {
+			log.Printf("频道解析失败: %+v", err)
+			return result, err
+		}
+		infos.Mutex.Lock()
+		infos.ChannelID[channel] = result
+		infos.Mutex.Unlock()
+	}
+	return result, nil
 }
