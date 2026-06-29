@@ -91,6 +91,7 @@ func handleParams(r *http.Request) (result Params, err error) {
 		limit = 20
 	}
 	result.Limit = int(limit)
+
 	offset, err := strconv.ParseInt(params.Get("offset"), 10, 32)
 	if err != nil || offset == 0 {
 		offset = 0
@@ -283,14 +284,22 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items := make([]Items, 0, len(params.Channels))
+	var items struct {
+		HasMore bool    `json:"more"`
+		Items   []Items `json:"items"`
+	}
+	items.Items = make([]Items, 0, len(params.Channels))
+
 	for _, channel := range params.Channels {
 		item, err := infos.list(channel, params.Page, params.Limit, params.Filter)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			log.Printf("获取频道 %s 的文件列表失败: %+v", channel, err)
+			continue
 		}
-		items = append(items, item)
+		if !items.HasMore {
+			items.HasMore = item.HasMore
+		}
+		items.Items = append(items.Items, item)
 	}
 	content, err := json.Marshal(items)
 	if err != nil {
