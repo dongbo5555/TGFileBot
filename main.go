@@ -115,6 +115,7 @@ type Infos struct {
 	RexRules   []*regexp.Regexp              // 预编译的群管正则规则缓存
 	FilesPath  string                        // 配置文件存放目录
 	FilePath   string                        // 日志文件路径
+	LatestID   string                        // 最近一次获取的消息 ID
 	BotID      int64                         // Bot 自身的 ID
 	Status     atomic.Int32                  // UserBot 登录状态: 0 未登录, 1 等待验证码, 2 等待二步验证, 3 已登录
 	WaitUntil  atomic.Int64                  // 等待结束时间
