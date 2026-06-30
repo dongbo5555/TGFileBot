@@ -679,6 +679,7 @@ func (infos *Infos) list(channel string, page, limit int, filter int64, reverse 
 	}
 
 	mids := make(map[int32]bool, 0)
+	maxNum := len(ms) - 1
 	for num, m := range ms {
 		if m.File == nil {
 			continue
@@ -696,7 +697,7 @@ func (infos *Infos) list(channel string, page, limit int, filter int64, reverse 
 			items.Channel = strings.TrimSpace(m.Channel.Title)
 		}
 
-		if num == 0 {
+		if num == 0 || num == maxNum {
 			medias, err := m.GetMediaGroup()
 			if err != nil {
 				log.Printf("提取媒体组错误: %+v", err)
@@ -705,8 +706,12 @@ func (infos *Infos) list(channel string, page, limit int, filter int64, reverse 
 				if IsVideoFile(media.File.Ext) && media.File.Size < filter {
 					continue
 				}
-				mids[media.ID] = true
 
+				if value, ok := mids[media.ID]; ok && value {
+					continue
+				}
+
+				mids[media.ID] = true
 				item := handleItem(media)
 				items.Item = append(items.Item, item)
 			}
