@@ -46,6 +46,7 @@ type Stream struct {
 	Init         atomic.Bool            // 是否已经初始化
 	Mutex        *sync.Mutex            // 用于保护并发安全
 	Tasks        chan *Task             // 任务管道, 用于向工作协程分发下载任务
+	Pools        []*telegram.WorkerPool // 每个工作协程的独立连接池 (Pools[numTask-1])
 }
 
 // newTask 初始化并返回一个 Task 对象
@@ -95,6 +96,7 @@ func newStream(ctx context.Context, client *telegram.Client, media telegram.Mess
 		Mutex:        new(sync.Mutex),
 		TaskStart:    new(int64),
 		TaskEnd:      new(int64),
+		Pools:        make([]*telegram.WorkerPool, workers), // 每个工作协程一个独立 slot
 	}
 }
 
@@ -193,7 +195,9 @@ func (stream *Stream) download(numTask int, contentStart, contentEnd int64) {
 			// 首次尝试给更长超时，容忍冷启动 TCP 连接重建 + TLS + MTProto 认证
 			timeout := 8 * time.Second
 
-			content, fileName, err := stream.Client.DownloadChunk(src, int(task.ContentStart), int(task.ContentEnd)+1, int(chunkSize), false, stream.Ctx, timeout)
+			// 获取该协程专属的连接池（nil 时 DownloadChunk 自动回退为临时 pool）
+			pool := stream.handlePool(numTask, src)
+			content, fileName, err := stream.Client.DownloadChunk(src, int(task.ContentStart), int(task.ContentEnd)+1, int(chunkSize), false, stream.Ctx, timeout, pool)
 			if err != nil {
 				errStr := strings.ToLower(err.Error())
 				switch {
@@ -367,7 +371,24 @@ func (stream *Stream) download(numTask int, contentStart, contentEnd int64) {
 func (stream *Stream) clean() {
 	// 创建计时器, 避免死循环
 	waiter := time.NewTimer(5 * time.Second)
-	defer waiter.Stop()
+	defer func() {
+		waiter.Stop()
+		// 等待所有 download 协程退出后再操作 Pools，消除与 handlePool 写入的数据竞争
+		// Count 由各协程自己递减（defer stream.Count.Add(-1)），此处轮询直到归零
+		for stream.Count.Load() > 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+		// 关闭所有工作协程的连接池（仅 drain channel，不终止底层 TCP）
+		for num, pool := range stream.Pools {
+			if pool != nil {
+				pool.Close()
+				stream.Pools[num] = nil
+			}
+		}
+		if infos.Conf.DeBUG {
+			log.Print("清理完成")
+		}
+	}()
 
 	for {
 		select {
@@ -439,6 +460,35 @@ func (stream *Stream) refresh(numTask int, version int64) (err error) {
 		log.Printf("文件引用已刷新: cid=%d, mid=%d, numTask=%d, version=%d, newVersion=%d", stream.CID, stream.MID, numTask, version, stream.Version.Load())
 	}
 	return nil
+}
+
+// handlePool 返回该协程专属的长连接池，首次调用时懒初始化。
+// 每个工作协程使用独立的 slot（Pools[numTask-1]），无需加锁。
+// 若初始化失败则返回 nil，DownloadChunk 自动回退至临时 pool 模式。
+func (stream *Stream) handlePool(numTask int, src telegram.MessageMedia) *telegram.WorkerPool {
+	idx := numTask - 1
+	// 快速路径：无锁检查，每个协程只读写自己的 slot
+	if stream.Pools[idx] != nil {
+		return stream.Pools[idx]
+	}
+	_, dc, _, _, err := telegram.GetFileLocation(src)
+	if err != nil {
+		log.Printf("无法解析文件 DC: %+v, 回退临时连接", err)
+		return nil
+	}
+	if dc == 0 {
+		dc = int32(stream.Client.GetDC())
+	}
+	pool, err := stream.Client.NewDownloadPool(dc)
+	if err != nil {
+		log.Printf("协程%d 初始化 DC%d 连接池失败: %+v, 回退临时连接", numTask, dc, err)
+		return nil
+	}
+	stream.Pools[idx] = pool
+	if infos.Conf.DeBUG {
+		log.Printf("协程%d 初始化连接池成功: DC%d, cid=%d, mid=%d", numTask, dc, stream.CID, stream.MID)
+	}
+	return stream.Pools[idx]
 }
 
 func (task *Task) handleContent(content []byte, offset, contentEnd int64) {
