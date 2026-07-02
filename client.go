@@ -861,10 +861,19 @@ func (infos *Infos) handleMs(cid int64, mid int32, cate string, params *telegram
 			log.Print(err.Error())
 			return result, []telegram.NewMessage{}, err
 		}
-		infos.Mutex.Lock()
-		evictOldestMsCache(infos.MsCache, infos.MaxMs)
-		infos.MsCache[key] = &MsCache{Mes: ms, Time: time.Now()}
-		infos.Mutex.Unlock()
+		hasMedia := false
+		for _, m := range ms {
+			if m.IsMedia() {
+				hasMedia = true
+				break
+			}
+		}
+		if hasMedia {
+			infos.Mutex.Lock()
+			evictOldestMsCache(infos.MsCache, infos.MaxMs)
+			infos.MsCache[key] = &MsCache{Mes: ms, Time: time.Now()}
+			infos.Mutex.Unlock()
+		}
 	}
 
 	return result, ms, nil
