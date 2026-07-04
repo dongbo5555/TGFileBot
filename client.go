@@ -660,11 +660,12 @@ func (infos *Infos) list(channel string, page, limit int, offset int32, filter i
 		Cate:     "user",
 	}
 
-	_, ms, err := infos.handleMs(params)
+	msCache, err := infos.handleMs(params)
 	if err != nil {
 		return items, err
 	}
 
+	ms := msCache.Mes
 	lenMs := len(ms)
 	switch {
 	case lenMs == 0:
@@ -771,11 +772,12 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 		Cate:     "user",
 	}
 
-	_, ms, err := infos.handleMs(params)
+	msCache, err := infos.handleMs(params)
 	if err != nil {
 		return items, err
 	}
 
+	ms := msCache.Mes
 	lenMs := len(ms)
 	switch {
 	case lenMs == 0:
@@ -807,7 +809,7 @@ func (infos *Infos) search(channel, keywords string, page, limit int, offset int
 }
 
 // selectClient 根据当前网络延迟选择最佳客户端
-func (infos *Infos) handleMs(params HandleMs) (result string, ms []telegram.NewMessage, err error) {
+func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 	var wakeTime time.Time
 
 	// 1. 选择下载客户端，并提取对应的唤醒时间
@@ -819,13 +821,12 @@ func (infos *Infos) handleMs(params HandleMs) (result string, ms []telegram.NewM
 		infos.Client = infos.BotClient
 		wakeTime = infos.TCPStatus.Bot.WakeTime
 	}
-	result = params.Cate
 
 	// 2. 统一处理 TCP 链路检查与唤醒逻辑（彻底去除了重复代码）
 	if time.Since(wakeTime).Minutes() > 30 {
 		if err = infos.wakeTCP(params.Cate); err != nil {
 			log.Printf("唤醒 TCP 连接失败: %+v", err)
-			return "", []telegram.NewMessage{}, err
+			return result, err
 		}
 	} else if infos.Conf.DeBUG {
 		diff := time.Since(wakeTime)
@@ -867,15 +868,14 @@ func (infos *Infos) handleMs(params HandleMs) (result string, ms []telegram.NewM
 	}
 
 	infos.Mutex.RLock()
-	value, ok := infos.MsCache[kname]
+	result, ok := infos.MsCache[kname]
 	infos.Mutex.RUnlock()
 
-	if ok && value.Mes != nil && len(value.Mes) >= params.Limit {
+	if ok && result.Mes != nil && len(result.Mes) >= params.Limit {
 		if infos.Conf.DeBUG {
 			log.Printf("命中消息缓存: %s", kname)
 		}
-		ms = value.Mes
-		value.Time = time.Now()
+		result.Time = time.Now()
 	} else {
 		param := &telegram.SearchOption{
 			IDs:     params.MIDs,
@@ -885,24 +885,25 @@ func (infos *Infos) handleMs(params HandleMs) (result string, ms []telegram.NewM
 			Context: params.Ctx,
 			Filter:  params.Filter,
 		}
-		ms, err = infos.Client.GetMessages(params.CID, param)
+		ms, err := infos.Client.GetMessages(params.CID, param)
 		if err != nil || len(ms) == 0 {
 			if len(ms) == 0 {
 				err = errors.New("未获取到消息")
 			}
 			err = fmt.Errorf("获取消息失败: cid=%v, mids=%v, count=%d, err=%+v", params.CID, params.MIDs, len(ms), err)
 			log.Print(err.Error())
-			return result, []telegram.NewMessage{}, err
+			return result, err
 		}
+		result = &MsCache{Mes: ms, Time: time.Now(), Cate: params.Cate}
 		if len(ms) == params.Limit {
 			infos.Mutex.Lock()
 			evictOldestMsCache(infos.MsCache, infos.MaxMs)
-			infos.MsCache[kname] = &MsCache{Mes: ms, Time: time.Now()}
+			infos.MsCache[kname] = result
 			infos.Mutex.Unlock()
 		}
 	}
 
-	return result, ms, nil
+	return result, nil
 }
 
 // handleChannel 处理频道ID, 返回 InputPeer

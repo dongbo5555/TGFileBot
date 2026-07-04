@@ -98,8 +98,10 @@ type MediaCache struct {
 }
 
 type MsCache struct {
-	Mes  []telegram.NewMessage
-	Time time.Time
+	Mes     []telegram.NewMessage
+	Cate    string
+	Time    time.Time
+	Version atomic.Int64
 }
 
 type Item struct {

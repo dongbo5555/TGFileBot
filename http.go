@@ -237,11 +237,14 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 		Limit: 1,
 	}
 
-	cate, ms, err := infos.handleMs(param)
+	msCache, err := infos.handleMs(param)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	ms := msCache.Mes
+	cate := msCache.Cate
+
 	if len(ms) == 0 {
 		http.Error(w, "未获取到消息", http.StatusBadRequest)
 		return
@@ -310,15 +313,58 @@ func handlePic(w http.ResponseWriter, r *http.Request) {
 	log.Printf("正在处理来自 %s 的请求, 开始下载封面, cid=%d, mid=%d, name=%s", clientIP, params.CID, params.MID, src.File.Name)
 
 	buf := new(bytes.Buffer)
-	_, err = infos.Client.DownloadMedia(src.Media(), &telegram.DownloadOptions{
-		ThumbOnly: true,
-		ThumbSize: actualThumb,
-		Buffer:    buf,
-		Ctx:       r.Context(),
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	maxCount := 2
+	for count := 1; count <= maxCount; count++ {
+		version := msCache.Version.Load()
+		_, err = infos.Client.DownloadMedia(src.Media(), &telegram.DownloadOptions{
+			ThumbOnly: true,
+			ThumbSize: actualThumb,
+			Buffer:    buf,
+			Ctx:       r.Context(),
+		})
+		if err != nil {
+			if telegram.MatchError(err, "FILE_REFERENCE_EXPIRED") {
+				if infos.Conf.DeBUG {
+					log.Printf("引用过期, 正在尝试刷新文件引用, cid=%d, mid=%d, name=%s", params.CID, params.MID, src.File.Name)
+				}
+				func() {
+					infos.Mutex.Lock()
+					defer infos.Mutex.Unlock()
+
+					if version != msCache.Version.Load() {
+						if infos.Conf.DeBUG {
+							log.Printf("文件引用已刷新, 直接使用新版本, cid=%d, mid=%d, name=%s, version=%d, newVersion=%d", params.CID, params.MID, src.File.Name, version, msCache.Version.Load())
+						}
+						return
+					}
+					// 重新获取消息
+					ms, err := infos.Client.GetMessages(params.CID, &telegram.SearchOption{
+						IDs:     []int32{params.MID},
+						Context: r.Context(),
+					})
+					if err != nil {
+						log.Printf("刷新文件引用失败: %+v", err)
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+					if len(ms) == 0 {
+						http.Error(w, "未获取到消息", http.StatusBadRequest)
+						return
+					}
+					src = ms[0]
+					if !src.IsMedia() {
+						http.Error(w, "消息不包含媒体", http.StatusBadRequest)
+						return
+					}
+					msCache.Mes = ms
+					msCache.Time = time.Now()
+					msCache.Version.Add(1)
+				}()
+			} else {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "image/jpeg")
@@ -449,11 +495,13 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 		Limit: 1,
 	}
 
-	cate, ms, err := infos.handleMs(param)
+	msCache, err := infos.handleMs(param)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	ms := msCache.Mes
+	cate := msCache.Cate
 
 	if len(ms) == 0 {
 		http.Error(w, "未获取到消息", http.StatusBadRequest)
@@ -534,10 +582,9 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 		go stream.start(start, end)
 		defer func() {
 			if stream.Version.Load() > 0 {
-				kname := cate + ":" + strconv.FormatInt(params.CID, 10) + ":" + strconv.FormatInt(int64(params.MID), 10)
 				infos.Mutex.Lock()
-				evictOldestMsCache(infos.MsCache, infos.MaxMs)
-				infos.MsCache[kname] = &MsCache{Mes: stream.Ms, Time: time.Now()}
+				msCache.Mes = stream.Ms
+				msCache.Time = time.Now()
 				infos.Mutex.Unlock()
 			}
 
@@ -648,11 +695,12 @@ func handleSources(w http.ResponseWriter, r *http.Request) {
 		Limit: params.Limit,
 	}
 
-	_, resources, err := infos.handleMs(param)
+	msCache, err := infos.handleMs(param)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	resources := msCache.Mes
 	if len(resources) == 0 {
 		http.Error(w, "未获取到消息", http.StatusBadRequest)
 		return
@@ -880,7 +928,8 @@ func handleComments(w http.ResponseWriter, r *http.Request) {
 		Limit: params.Limit,
 	}
 
-	_, ms, err := infos.handleMs(param)
+	msCache, err := infos.handleMs(param)
+	ms := msCache.Mes
 	if err != nil || len(ms) == 0 {
 		if len(ms) == 0 {
 			err = errors.New("未获取到消息")
@@ -1013,7 +1062,9 @@ func hackLinks(res HackLink) (links []string) {
 			Cate:  "user",
 			Limit: 1,
 		}
-		_, ms, err := infos.handleMs(param)
+
+		msCache, err := infos.handleMs(param)
+		ms := msCache.Mes
 		if err != nil || len(ms) == 0 {
 			log.Printf("获取消息失败: cid=%v, mid=%d, err=%v, count=%d", cid, mid, err, len(ms))
 			if len(ms) == 0 {
