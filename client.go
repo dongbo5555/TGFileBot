@@ -895,7 +895,7 @@ func (infos *Infos) handleMs(params HandleMs) (result *MsCache, err error) {
 			return result, err
 		}
 		result = &MsCache{Mes: ms, Time: time.Now(), Cate: params.Cate}
-		if len(ms) == params.Limit {
+		if len(ms) == params.Limit && (lenMIDs > 0 || params.OffsetID > 0) {
 			infos.Mutex.Lock()
 			evictOldestMsCache(infos.MsCache, infos.MaxMs)
 			infos.MsCache[kname] = result
