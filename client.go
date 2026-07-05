@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/amarnathcjd/gogram/telegram"
 )
@@ -1067,7 +1068,20 @@ func handleLinks(res HackLink, src telegram.NewMessage) (link string) {
 func handleItem(m telegram.NewMessage) (item Item) {
 	src := strings.TrimSpace(m.Text())
 	src = strings.ReplaceAll(src, "_", "")
-	src = strings.Join(strings.Fields(src), " ")
+	src = strings.TrimSpace(src)
+
+	var last rune
+	var srcBuilder strings.Builder
+	srcBuilder.Grow(len(src))
+	for _, char := range src {
+		if unicode.IsSpace(char) && char == last {
+			continue
+		}
+		srcBuilder.WriteRune(char)
+		last = char
+	}
+	src = srcBuilder.String()
+	
 	name := strings.TrimSpace(m.File.Name)
 	name = strings.ReplaceAll(name, "_", "")
 	name = strings.Join(strings.Fields(name), " ")
