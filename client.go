@@ -1155,7 +1155,7 @@ func handleLinks(res HackLink, item Item) (link string) {
 // handleItem 处理消息媒体, 返回 Item
 func handleItem(m telegram.NewMessage) (item Item) {
 	src := strings.TrimSpace(m.Text())
-	src = strings.ReplaceAll(src, "_", "")
+	src = strings.ReplaceAll(src, "_", "-")
 	src = strings.TrimSpace(src)
 
 	var last rune
@@ -1171,7 +1171,7 @@ func handleItem(m telegram.NewMessage) (item Item) {
 	src = srcBuilder.String()
 
 	name := strings.TrimSpace(m.File.Name)
-	name = strings.ReplaceAll(name, "_", "")
+	name = strings.ReplaceAll(name, "_", "-")
 	name = strings.Join(strings.Fields(name), " ")
 
 	item.Ext = m.File.Ext
